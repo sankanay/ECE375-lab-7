@@ -1,4 +1,3 @@
-
 ;***********************************************************
 ;*
 ;*	This is the TRANSMIT skeleton file for Lab 7 of ECE 375
@@ -86,7 +85,7 @@ INIT:
 		sts		UBRR1L, mpr	
 		
 		;Enable receiver and transmitter
-		ldi	mpr, (1<<TXEN1 | 1<<RXEN1) 
+		ldi	mpr, (1<<TXEN1 | 1<<RXEN1 | 1<<RXCIE1) 
 		sts	UCSR1B, mpr 	
 		
 		;Set frame format: 8 data bits, 2 stop bits
@@ -102,15 +101,12 @@ INIT:
 		rcall	LINE2
 
 		;Other
-
+		sei
 
 ;***********************************************************
 ;*  Main Program
 ;***********************************************************
 MAIN:
-	
-
-		
 
 		in		mpr, PIND
 		andi	mpr, (1<<4 | 1<<7 | 1<<5)
@@ -119,7 +115,7 @@ MAIN:
 		rcall	WAIT_OPPONENT
 		rcall	READY
 		rcall	WAITING
-
+		rcall	USART_Transmit
 		rjmp	MAIN
 NEXT:
 		cpi		mpr, $90
@@ -232,8 +228,60 @@ TEST:
 		nop
 		rjmp	USART_Recieve*/
 
-USART_Recieve:
-		nop
+USART_Transmit: 
+		lds		mpr, UCSR1A
+		ldi		mpr2, SendReady
+		sbrs	mpr, UDRE1		; Loop until UDR1 is empty 
+		rjmp	USART_Transmit 
+		sts		UDR1, mpr2 		; Move data to transmit data buffer 
+		ret
+
+
+USART_Receive:
+		push	mpr
+		lds		mpr2, UDR1
+		cpi		mpr2, SendReady
+		brne	USART_Receive
+		rcall	LCDClr
+		rcall	GAME_START
+		rcall	GAME1
+		;rcall	GAME2
+		pop		mpr
+		reti
+
+GAME_START:
+		ldi		ZH, HIGH(STRING_BEG5<<1); Move strings from Program Memory to Data Memory
+		ldi		ZL, LOW(STRING_BEG5<<1)
+		lpm		r17, Z
+		ldi		YL, $00
+		ldi		YH, $01
+		st		Y, r17
+		ret
+
+GAME1:
+		lpm		mpr, Z+
+		st		Y+, mpr
+		cpi		ZL, low(STRING_END5<<1)
+		brne	GAME1
+		cpi		ZH, high(STRING_END5<<1)	
+
+/*		ldi		ZH, HIGH(STRING_BEG5<<1); Move strings from Program Memory to Data Memory
+		ldi		ZL, LOW(STRING_BEG5<<1)
+		lpm		r17, Z
+		ldi		YL, $10
+		ldi		YH, $01
+		st		Y, r17
+		ret
+
+GAME2:
+		lpm		mpr, Z+
+		st		Y+, mpr
+		cpi		ZL, low(STRING_END5<<1)
+		brne	GAME2
+		cpi		ZH, high(STRING_END5<<1)*/
+
+		rcall	LCDWrite
+		ret
 
 ;***********************************************************
 ;*	Stored Program Data
@@ -272,4 +320,3 @@ STRING_BEG9:
 STRING_END9:*/
 
 .include "LCDDriver.asm"
-
