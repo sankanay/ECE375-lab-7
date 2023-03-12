@@ -21,12 +21,19 @@
 .def    mpr = r16               ; Multi-Purpose Register
 .def	mpr2 = r17
 
+
+.equ	ready1 = 7
+.equ	cycle = 4
+
+.def	readyFlag = r18
+.def	recFlag = r19
+
+
+
 ; Use this signal code between two boards for their game ready
 .equ    SendReady = 0b11111111
 
 
-.equ	startgame = 7
-.equ	choseitem = 4
 
 ;***********************************************************
 ;*  Start of Code Segment
@@ -54,9 +61,10 @@ INIT:
 		ldi		mpr, LOW(RAMEND)
 		out		SPL, mpr
 
-		;I/O Ports
 
-		; Initialize Port B for input
+		
+
+		; Initialize Port B for output
 		ldi		mpr, $FF		; Set Port B Data Direction Register
 		out		DDRB, mpr		; for output
 		ldi		mpr, $00		; Initialize Port B Data Register
@@ -65,8 +73,12 @@ INIT:
 		; Initialize Port D for input
 		ldi		mpr, $00		; Set Port D Data Direction Register
 		out		DDRD, mpr		; for input
-		ldi		mpr, $FF		; Initialize Port D Data Register
+		ldi		mpr, $FF 		; Initialize Port D Data Register
 		out		PORTD, mpr		; so all Port D inputs are Tri-State
+
+		/*ldi		mpr, (1<<PD3)
+		out		DDRD, mpr*/
+
 
 		; Initialize LCD display
 		rcall	LCDInit
@@ -83,19 +95,22 @@ INIT:
 		sts		UBRR1H, mpr
 		ldi		mpr, low(416)
 		sts		UBRR1L, mpr	
+
+		;Set frame format: 8 data bits, 2 stop bits
+		ldi		mpr, (1<<USBS1 | 1<<UCSZ11 | 1<<UCSZ10 | 0<<UMSEL11 | 0<<UMSEL10) 
+		sts 	UCSR1C, mpr	
 		
 		;Enable receiver and transmitter
 		ldi	mpr, (1<<TXEN1 | 1<<RXEN1 | 1<<RXCIE1) 
 		sts	UCSR1B, mpr 	
 		
-		;Set frame format: 8 data bits, 2 stop bits
-		ldi		mpr, (1<<USBS1 | 1<<UCSZ11 | 1<<UCSZ10) 
-		sts 	UCSR1C, mpr	
+		
 		
 		
 		;TIMER/COUNTER1
 			;Set Normal mode
-
+		ldi		readyFlag, 0
+		ldi		recFlag, 0
 		rcall	SETUPLINES
 		rcall	LINE1
 		rcall	LINE2
@@ -110,29 +125,18 @@ MAIN:
 
 		in		mpr, PIND
 		andi	mpr, (1<<4 | 1<<7 | 1<<5)
-		cpi		mpr, $30
-		brne	NEXT
-		rcall	WAIT_OPPONENT
-		rcall	READY
-		rcall	WAITING
-		rcall	USART_Transmit
+		cpi		mpr, $30		; check if left most is hit
+		brne	NEXT			; branch to NEXT if not hit
+		rcall	WAIT_OPPONENT	; display "WAITING FOR OPPONENT"
+		rcall	READY			; display "WAITING FOR OPPONENT"
+		rcall	WAITING			; display "WAITING FOR OPPONENT"
+		rcall	USART_Transmit	; transmit ready signal
 		rjmp	MAIN
 NEXT:
 		cpi		mpr, $90
 		brne	MAIN
 		nop
 		rjmp	MAIN
-
-		;rjmp	MAIN
-
-		/*in		mpr, PIND
-		andi	mpr, (1<<4 | 1<<5 | 1<<7)
-		cpi		mpr, $30
-		brne	MAIN
-		rcall	WAIT_OPPONENT
-		rcall	READY
-		rcall	WAITING*/
-		
 
 
 
@@ -212,33 +216,23 @@ WAITING:
 		ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-/*USART_Transmit:
-		lds		mpr, UCSR1A
-
-
-USART_Receive:
-		push	mpr
-		lds		mpr2, UDR1
-		cpi		UDR11, SendReady
-		brne	TEST
-		rcall	LCDClr
-		pop		mpr
-		reti
-TEST:
-		nop
-		rjmp	USART_Recieve*/
 
 USART_Transmit: 
+		;inc		readyFlag		; 1 + 1 = 2
 		lds		mpr, UCSR1A
 		ldi		mpr2, SendReady
 		sbrs	mpr, UDRE1		; Loop until UDR1 is empty 
 		rjmp	USART_Transmit 
 		sts		UDR1, mpr2 		; Move data to transmit data buffer 
+		rcall	USART_Receive
 		ret
 
-
 USART_Receive:
-		push	mpr
+		inc		readyFlag
+		cpi		readyFlag, 2	;2 == 2
+		brne	NOTHING
+		rcall	USART_Rec
+		/*push	mpr
 		lds		mpr2, UDR1
 		cpi		mpr2, SendReady
 		brne	USART_Receive
@@ -246,8 +240,23 @@ USART_Receive:
 		rcall	GAME_START
 		rcall	GAME1
 		;rcall	GAME2
-		pop		mpr
+		pop		mpr*/
 		reti
+
+NOTHING:
+		ret
+
+USART_Rec:
+		push	mpr
+		lds		mpr2, UDR1
+		cpi		mpr2, SendReady
+		brne	USART_Rec
+		rcall	LCDClr
+		rcall	GAME_START
+		rcall	GAME1
+		pop		mpr
+		ldi		readyFlag, 0
+		ret
 
 GAME_START:
 		ldi		ZH, HIGH(STRING_BEG5<<1); Move strings from Program Memory to Data Memory
@@ -264,21 +273,6 @@ GAME1:
 		cpi		ZL, low(STRING_END5<<1)
 		brne	GAME1
 		cpi		ZH, high(STRING_END5<<1)	
-
-/*		ldi		ZH, HIGH(STRING_BEG5<<1); Move strings from Program Memory to Data Memory
-		ldi		ZL, LOW(STRING_BEG5<<1)
-		lpm		r17, Z
-		ldi		YL, $10
-		ldi		YH, $01
-		st		Y, r17
-		ret
-
-GAME2:
-		lpm		mpr, Z+
-		st		Y+, mpr
-		cpi		ZL, low(STRING_END5<<1)
-		brne	GAME2
-		cpi		ZH, high(STRING_END5<<1)*/
 
 		rcall	LCDWrite
 		ret
