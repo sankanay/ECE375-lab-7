@@ -20,13 +20,15 @@
 ;***********************************************************
 .def    mpr = r16               ; Multi-Purpose Register
 .def	mpr2 = r17
+.def	readyFlag = r18
+.def	btn1Flag = r19
+.def	itemchoice = r23
 
 
 .equ	ready1 = 7
 .equ	cycle = 4
 
-.def	readyFlag = r18
-.def	recFlag = r19
+
 
 
 
@@ -45,6 +47,7 @@
 ;***********************************************************
 .org    $0000                   ; Beginning of IVs
 	    rjmp    INIT            ; Reset interrupt
+
 
 .org	$0032
 		rjmp	USART_Receive
@@ -82,7 +85,7 @@ INIT:
 
 		; Initialize LCD display
 		rcall	LCDInit
-		rcall	LCDBacklightOn
+		;rcall	LCDBacklightOn
 		rcall	LCDClr
 
 
@@ -110,7 +113,8 @@ INIT:
 		;TIMER/COUNTER1
 			;Set Normal mode
 		ldi		readyFlag, 0
-		ldi		recFlag, 0
+		ldi		btn1Flag, 0
+		ldi		itemchoice, 0
 		rcall	SETUPLINES
 		rcall	LINE1
 		rcall	LINE2
@@ -127,15 +131,23 @@ MAIN:
 		andi	mpr, (1<<4 | 1<<7 | 1<<5)
 		cpi		mpr, $30		; check if left most is hit
 		brne	NEXT			; branch to NEXT if not hit
+		cpi		btn1Flag, 0
+		brne	MAIN
+		inc		btn1Flag		; inc btn1 flag
 		rcall	WAIT_OPPONENT	; display "WAITING FOR OPPONENT"
 		rcall	READY			; display "WAITING FOR OPPONENT"
 		rcall	WAITING			; display "WAITING FOR OPPONENT"
 		rcall	USART_Transmit	; transmit ready signal
+		inc		readyFlag
+		rcall	START_DIPLAY
 		rjmp	MAIN
+
 NEXT:
-		cpi		mpr, $90
+		cpi		btn1Flag, 1
 		brne	MAIN
-		nop
+		cpi		mpr, $A0
+		brne	MAIN
+		rcall	CHOSE_ITEM
 		rjmp	MAIN
 
 
@@ -218,43 +230,32 @@ WAITING:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 USART_Transmit: 
-		;inc		readyFlag		; 1 + 1 = 2
 		lds		mpr, UCSR1A
 		ldi		mpr2, SendReady
 		sbrs	mpr, UDRE1		; Loop until UDR1 is empty 
 		rjmp	USART_Transmit 
 		sts		UDR1, mpr2 		; Move data to transmit data buffer 
-		rcall	USART_Receive
 		ret
 
 USART_Receive:
-		inc		readyFlag
-		cpi		readyFlag, 2	;2 == 2
-		brne	NOTHING
-		rcall	USART_Rec
-		/*push	mpr
+		push	mpr
 		lds		mpr2, UDR1
 		cpi		mpr2, SendReady
-		brne	USART_Receive
-		rcall	LCDClr
-		rcall	GAME_START
-		rcall	GAME1
-		;rcall	GAME2
-		pop		mpr*/
+		brne	NOTHING
+		inc		readyFlag
+		rcall	START_DIPLAY
+		pop		mpr
 		reti
 
 NOTHING:
 		ret
 
-USART_Rec:
-		push	mpr
-		lds		mpr2, UDR1
-		cpi		mpr2, SendReady
-		brne	USART_Rec
+START_DIPLAY:
+		cpi		readyFlag, 2	
+		brne	NOTHING
 		rcall	LCDClr
 		rcall	GAME_START
 		rcall	GAME1
-		pop		mpr
 		ldi		readyFlag, 0
 		ret
 
@@ -273,9 +274,102 @@ GAME1:
 		cpi		ZL, low(STRING_END5<<1)
 		brne	GAME1
 		cpi		ZH, high(STRING_END5<<1)	
-
 		rcall	LCDWrite
 		ret
+
+CHOSE_ITEM:
+		inc		itemchoice
+		cpi		itemchoice, 1
+		brne	CHOICE2
+		rcall	LCDClrLn2
+		rcall	DISPLAY_ROCK
+		ret
+CHOICE2: 
+		cpi		itemchoice, 2
+		brne	CHOICE3
+		rcall	LCDClrLn2
+		rcall	DISPLAY_PAPER
+		ret
+CHOICE3:
+		cpi		itemchoice, 3
+		brne	NOTHING
+		rcall	LCDClrLn2
+		rcall	DISPLAY_SCISSOR
+		ldi		itemchoice, 0
+		ret
+
+DISPLAY_ROCK:
+		
+		/*ldi		ZH, HIGH(STRING_BEG7<<1); Move strings from Program Memory to Data Memory
+		ldi		ZL, LOW(STRING_BEG7<<1)
+		lpm		r17, Z
+		ldi		YL, $10
+		ldi		YH, $01
+		st		Y, r17*/
+
+		mov mpr, itemchoice ; move to register to be displayed
+		ldi XL, low($0114) ; load X with beginning address
+		ldi XH, high($0114) ; of where result will be stored
+
+DISPLAY_ROCK2:
+
+		/*lpm		mpr, Z+
+		st		Y+, mpr
+		cpi		ZL, low(STRING_END7<<1)
+		brne	DISPLAY_ROCK2
+		cpi		ZH, high(STRING_END7<<1)*/
+		rcall	Bin2ASCII
+		rcall	LCDWrLn2
+		ret
+
+DISPLAY_PAPER:
+		
+		/*ldi		ZH, HIGH(STRING_BEG8<<1); Move strings from Program Memory to Data Memory
+		ldi		ZL, LOW(STRING_BEG8<<1)
+		lpm		r17, Z
+		ldi		YL, $10
+		ldi		YH, $01
+		st		Y, r17*/
+		mov mpr, itemchoice ; move to register to be displayed
+		ldi XL, low($0114) ; load X with beginning address
+		ldi XH, high($0114) ; of where result will be stored
+
+DISPLAY_PAPER2:
+
+		/*lpm		mpr, Z+
+		st		Y+, mpr
+		cpi		ZL, low(STRING_END8<<1)
+		brne	DISPLAY_PAPER2
+		cpi		ZH, high(STRING_END8<<1)*/
+
+		rcall	Bin2ASCII
+		rcall	LCDWrLn2
+		ret
+
+DISPLAY_SCISSOR:
+		
+		/*ldi		ZH, HIGH(STRING_BEG9<<1); Move strings from Program Memory to Data Memory
+		ldi		ZL, LOW(STRING_BEG9<<1)
+		lpm		r17, Z
+		ldi		YL, $10
+		ldi		YH, $01
+		st		Y, r17*/
+		mov mpr, itemchoice ; move to register to be displayed
+		ldi XL, low($0114) ; load X with beginning address
+		ldi XH, high($0114) ; of where result will be stored
+
+DISPLAY_SCISSOR2:
+
+		/*lpm		mpr, Z+
+		st		Y+, mpr
+		cpi		ZL, low(STRING_END9<<1)
+		brne	DISPLAY_SCISSOR2
+		cpi		ZH, high(STRING_END9<<1)*/
+
+		rcall	Bin2ASCII
+		rcall	LCDWrLn2
+		ret
+		
 
 ;***********************************************************
 ;*	Stored Program Data
@@ -303,14 +397,14 @@ STRING_END5:
 STRING_BEG6:
 	.DB		"for the opponent"
 STRING_END6:
-/*STRING_BEG7:
+STRING_BEG7:
 	.DB		"ROCK"
 STRING_END7:
 STRING_BEG8:
-	.DB		"PAPER"
+	.DB		"PAPER "
 STRING_END8:
 STRING_BEG9:
-	.DB		"SCISSOR"
-STRING_END9:*/
+	.DB		"SCISSORS"
+STRING_END9:
 
 .include "LCDDriver.asm"
