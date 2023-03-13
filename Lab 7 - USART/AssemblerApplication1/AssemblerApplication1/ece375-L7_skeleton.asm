@@ -24,6 +24,9 @@
 .def	btn1Flag = r19
 .def	itemchoice = r23
 
+.def	waitcnt = r24				; Wait Loop Counter
+.def	ilcnt = r25			; Inner Loop Counter
+;.def	olcnt = r25				; Outer Loop Counter
 
 .equ	ready1 = 7
 .equ	cycle = 4
@@ -47,6 +50,7 @@
 ;***********************************************************
 .org    $0000                   ; Beginning of IVs
 	    rjmp    INIT            ; Reset interrupt
+
 
 
 .org	$0032
@@ -79,13 +83,9 @@ INIT:
 		ldi		mpr, $FF 		; Initialize Port D Data Register
 		out		PORTD, mpr		; so all Port D inputs are Tri-State
 
-		/*ldi		mpr, (1<<PD3)
-		out		DDRD, mpr*/
-
-
 		; Initialize LCD display
 		rcall	LCDInit
-		;rcall	LCDBacklightOn
+		rcall	LCDBacklightOn
 		rcall	LCDClr
 
 
@@ -107,17 +107,22 @@ INIT:
 		ldi	mpr, (1<<TXEN1 | 1<<RXEN1 | 1<<RXCIE1) 
 		sts	UCSR1B, mpr 	
 		
-		
-		
-		
 		;TIMER/COUNTER1
-			;Set Normal mode
+
+
+		;Set Normal mode
+
+		; Clear flags for communication
 		ldi		readyFlag, 0
 		ldi		btn1Flag, 0
 		ldi		itemchoice, 0
+
+		; Welcome screen for the players
 		rcall	SETUPLINES
 		rcall	LINE1
 		rcall	LINE2
+
+
 
 		;Other
 		sei
@@ -145,6 +150,7 @@ MAIN:
 NEXT:
 		cpi		btn1Flag, 1
 		brne	MAIN
+		rcall	Wait
 		cpi		mpr, $A0
 		brne	MAIN
 		rcall	CHOSE_ITEM
@@ -300,75 +306,87 @@ CHOICE3:
 
 DISPLAY_ROCK:
 		
-		/*ldi		ZH, HIGH(STRING_BEG7<<1); Move strings from Program Memory to Data Memory
+		ldi		ZH, HIGH(STRING_BEG7<<1); Move strings from Program Memory to Data Memory
 		ldi		ZL, LOW(STRING_BEG7<<1)
 		lpm		r17, Z
 		ldi		YL, $10
 		ldi		YH, $01
-		st		Y, r17*/
-
-		mov mpr, itemchoice ; move to register to be displayed
-		ldi XL, low($0114) ; load X with beginning address
-		ldi XH, high($0114) ; of where result will be stored
+		st		Y, r17
 
 DISPLAY_ROCK2:
 
-		/*lpm		mpr, Z+
+		lpm		mpr, Z+
 		st		Y+, mpr
 		cpi		ZL, low(STRING_END7<<1)
 		brne	DISPLAY_ROCK2
-		cpi		ZH, high(STRING_END7<<1)*/
-		rcall	Bin2ASCII
+		cpi		ZH, high(STRING_END7<<1)
 		rcall	LCDWrLn2
 		ret
 
 DISPLAY_PAPER:
 		
-		/*ldi		ZH, HIGH(STRING_BEG8<<1); Move strings from Program Memory to Data Memory
+		ldi		ZH, HIGH(STRING_BEG8<<1); Move strings from Program Memory to Data Memory
 		ldi		ZL, LOW(STRING_BEG8<<1)
 		lpm		r17, Z
 		ldi		YL, $10
 		ldi		YH, $01
-		st		Y, r17*/
-		mov mpr, itemchoice ; move to register to be displayed
-		ldi XL, low($0114) ; load X with beginning address
-		ldi XH, high($0114) ; of where result will be stored
+		st		Y, r17
 
 DISPLAY_PAPER2:
 
-		/*lpm		mpr, Z+
+		lpm		mpr, Z+
 		st		Y+, mpr
 		cpi		ZL, low(STRING_END8<<1)
 		brne	DISPLAY_PAPER2
-		cpi		ZH, high(STRING_END8<<1)*/
-
-		rcall	Bin2ASCII
+		cpi		ZH, high(STRING_END8<<1)
 		rcall	LCDWrLn2
 		ret
 
 DISPLAY_SCISSOR:
 		
-		/*ldi		ZH, HIGH(STRING_BEG9<<1); Move strings from Program Memory to Data Memory
+		ldi		ZH, HIGH(STRING_BEG9<<1); Move strings from Program Memory to Data Memory
 		ldi		ZL, LOW(STRING_BEG9<<1)
 		lpm		r17, Z
 		ldi		YL, $10
 		ldi		YH, $01
-		st		Y, r17*/
-		mov mpr, itemchoice ; move to register to be displayed
-		ldi XL, low($0114) ; load X with beginning address
-		ldi XH, high($0114) ; of where result will be stored
+		st		Y, r17
 
 DISPLAY_SCISSOR2:
 
-		/*lpm		mpr, Z+
+		lpm		mpr, Z+
 		st		Y+, mpr
 		cpi		ZL, low(STRING_END9<<1)
 		brne	DISPLAY_SCISSOR2
-		cpi		ZH, high(STRING_END9<<1)*/
-
-		rcall	Bin2ASCII
+		cpi		ZH, high(STRING_END9<<1)
 		rcall	LCDWrLn2
 		ret
+
+;----------------------------------------------------------------
+; Sub:	Wait
+; Desc:	A wait loop that is 16 + 159975*waitcnt cycles or roughly
+;		waitcnt*10ms.  Just initialize wait for the specific amount
+;		of time in 10ms intervals. Here is the general eqaution
+;		for the number of clock cycles in the wait loop:
+;			(((((3*ilcnt)-1+4)*olcnt)-1+4)*waitcnt)-1+16
+;----------------------------------------------------------------
+Wait:
+		push	waitcnt			; Save wait register
+		push	ilcnt			; Save ilcnt register
+		push	mpr2			; Save olcnt register
+
+Loop:	ldi		mpr2, 90		; load olcnt register
+OLoop:	ldi		ilcnt, 80		; load ilcnt register
+ILoop:	dec		ilcnt			; decrement ilcnt
+		brne	ILoop			; Continue Inner Loop
+		dec		mpr2		; decrement olcnt
+		brne	OLoop			; Continue Outer Loop
+		dec		waitcnt		; Decrement wait
+		brne	Loop			; Continue Wait loop
+
+		pop		mpr2		; Restore olcnt register
+		pop		ilcnt		; Restore ilcnt register
+		pop		waitcnt		; Restore wait register
+		ret				; Return from subroutine
 		
 
 ;***********************************************************
@@ -406,5 +424,11 @@ STRING_END8:
 STRING_BEG9:
 	.DB		"SCISSORS"
 STRING_END9:
+STRING_BEG10:
+	.DB		"You Lost! "
+STRING_END10:
+STRING_BEG11:
+	.DB		"You Won!"
+STRING_END11:
 
 .include "LCDDriver.asm"
