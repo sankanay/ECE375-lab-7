@@ -23,6 +23,7 @@
 .def	readyFlag = r18
 .def	btn1Flag = r19
 .def	itemchoice = r23
+;.def	ledcounter = r15
 
 .def	waitcnt = r24				; Wait Loop Counter
 .def	ilcnt = r25			; Inner Loop Counter
@@ -30,10 +31,6 @@
 
 .equ	ready1 = 7
 .equ	cycle = 4
-
-
-
-
 
 ; Use this signal code between two boards for their game ready
 .equ    SendReady = 0b11111111
@@ -51,6 +48,8 @@
 .org    $0000                   ; Beginning of IVs
 	    rjmp    INIT            ; Reset interrupt
 
+.org	$0022
+		rjmp	Timer_Interrupt
 
 
 .org	$0032
@@ -67,9 +66,6 @@ INIT:
 		out		SPH, mpr
 		ldi		mpr, LOW(RAMEND)
 		out		SPL, mpr
-
-
-		
 
 		; Initialize Port B for output
 		ldi		mpr, $FF		; Set Port B Data Direction Register
@@ -88,7 +84,6 @@ INIT:
 		rcall	LCDBacklightOn
 		rcall	LCDClr
 
-
 		;USART1
 		ldi		mpr, (1<<U2X1)	
 		sts		UCSR1A, mpr
@@ -104,25 +99,22 @@ INIT:
 		sts 	UCSR1C, mpr	
 		
 		;Enable receiver and transmitter
-		ldi	mpr, (1<<TXEN1 | 1<<RXEN1 | 1<<RXCIE1) 
-		sts	UCSR1B, mpr 	
+		ldi		mpr, (1<<TXEN1 | 1<<RXEN1 | 1<<RXCIE1) 
+		sts		UCSR1B, mpr 	
 		
 		;TIMER/COUNTER1
-
-
-		;Set Normal mode
+		
 
 		; Clear flags for communication
 		ldi		readyFlag, 0
 		ldi		btn1Flag, 0
 		ldi		itemchoice, 0
+		;ldi		ledcounter, 0
 
 		; Welcome screen for the players
 		rcall	SETUPLINES
 		rcall	LINE1
 		rcall	LINE2
-
-
 
 		;Other
 		sei
@@ -153,15 +145,36 @@ NEXT:
 		rcall	Wait
 		cpi		mpr, $A0
 		brne	MAIN
+		;rcall	timer_init
 		rcall	CHOSE_ITEM
 		rjmp	MAIN
 
+timer_init:
 
+		ldi		r16, 0x48         ; Set the timer compare match value (18750)
+		sts		OCR1AH, r16
+		ldi		r16, 0xCC
+		sts		OCR1AL, r16
 
+		ldi		mpr, 0b00000000
+		sts		TCCR1A, mpr
 
-;***********************************************************
+		ldi		mpr, 0b00000100 ; set prescalar 1024
+		sts		TCCR1B, mpr
+
+		ldi		mpr, 0x02
+		sts		TIMSK1, mpr
+
+		sei
+
+		ret
+
+;****************************************************************
 ;*	Functions and Subroutines
-;***********************************************************
+;****************************************************************
+;----------------------------------------------------------------
+;-		FUNCTION: Initial Welcome Screen
+;----------------------------------------------------------------
 SETUPLINES:
 	
 		ldi		ZH, HIGH(STRING_BEG1<<1); Move strings from Program Memory to Data Memory
@@ -197,7 +210,9 @@ LINE2:
 		rcall	LCDWrite
 		ret
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;----------------------------------------------------------------
+;-		FUNCTION: Display Waiting for Opponenet
+;----------------------------------------------------------------
 WAIT_OPPONENT:
 
 		ldi		ZH, HIGH(STRING_BEG3<<1); Move strings from Program Memory to Data Memory
@@ -233,8 +248,9 @@ WAITING:
 		rcall	LCDWrite
 		ret
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
+;----------------------------------------------------------------
+;-		FUNCTION: Transmit and Wait for Ready from Players
+;----------------------------------------------------------------
 USART_Transmit: 
 		lds		mpr, UCSR1A
 		ldi		mpr2, SendReady
@@ -249,6 +265,7 @@ USART_Receive:
 		cpi		mpr2, SendReady
 		brne	NOTHING
 		inc		readyFlag
+		;rcall	timer_init
 		rcall	START_DIPLAY
 		pop		mpr
 		reti
@@ -256,10 +273,14 @@ USART_Receive:
 NOTHING:
 		ret
 
+;----------------------------------------------------------------
+;-		FUNCTION: Start Game Message
+;----------------------------------------------------------------
 START_DIPLAY:
 		cpi		readyFlag, 2	
 		brne	NOTHING
 		rcall	LCDClr
+		rcall	timer_init
 		rcall	GAME_START
 		rcall	GAME1
 		ldi		readyFlag, 0
@@ -281,8 +302,12 @@ GAME1:
 		brne	GAME1
 		cpi		ZH, high(STRING_END5<<1)	
 		rcall	LCDWrite
+		rcall	COUNTDOWN
 		ret
 
+;----------------------------------------------------------------
+;-		FUNCTION: Scroll through choices
+;----------------------------------------------------------------
 CHOSE_ITEM:
 		inc		itemchoice
 		cpi		itemchoice, 1
@@ -304,6 +329,9 @@ CHOICE3:
 		ldi		itemchoice, 0
 		ret
 
+;----------------------------------------------------------------
+;-		FUNCTION: Display Rock
+;----------------------------------------------------------------
 DISPLAY_ROCK:
 		
 		ldi		ZH, HIGH(STRING_BEG7<<1); Move strings from Program Memory to Data Memory
@@ -323,6 +351,9 @@ DISPLAY_ROCK2:
 		rcall	LCDWrLn2
 		ret
 
+;----------------------------------------------------------------
+;-		FUNCTION: Display Paper
+;----------------------------------------------------------------
 DISPLAY_PAPER:
 		
 		ldi		ZH, HIGH(STRING_BEG8<<1); Move strings from Program Memory to Data Memory
@@ -341,6 +372,10 @@ DISPLAY_PAPER2:
 		cpi		ZH, high(STRING_END8<<1)
 		rcall	LCDWrLn2
 		ret
+
+;----------------------------------------------------------------
+;-		FUNCTION: Display Scissors
+;----------------------------------------------------------------
 
 DISPLAY_SCISSOR:
 		
@@ -362,6 +397,31 @@ DISPLAY_SCISSOR2:
 		ret
 
 ;----------------------------------------------------------------
+;-		FUNCTION: TIMER/COUNTER1 Countdown
+;----------------------------------------------------------------
+COUNTDOWN:
+
+		ldi		mpr, 0b11110000
+		out		PORTB, mpr	
+		
+			
+		ret
+
+;----------------------------------------------------------------
+;-		FUNCTION: TIMER/COUNTER1 Interrupt
+;----------------------------------------------------------------
+Timer_Interrupt:
+
+		in mpr, PORTB
+		lsr mpr
+		andi mpr, $F0
+		out PORTB, mpr
+		rjmp timer_init
+		
+		reti
+
+
+;----------------------------------------------------------------
 ; Sub:	Wait
 ; Desc:	A wait loop that is 16 + 159975*waitcnt cycles or roughly
 ;		waitcnt*10ms.  Just initialize wait for the specific amount
@@ -374,20 +434,19 @@ Wait:
 		push	ilcnt			; Save ilcnt register
 		push	mpr2			; Save olcnt register
 
-Loop:	ldi		mpr2, 90		; load olcnt register
-OLoop:	ldi		ilcnt, 80		; load ilcnt register
-ILoop:	dec		ilcnt			; decrement ilcnt
-		brne	ILoop			; Continue Inner Loop
+Loop1:	ldi		mpr2, 90		; load olcnt register
+OLoop1:	ldi		ilcnt, 80		; load ilcnt register
+ILoop1:	dec		ilcnt			; decrement ilcnt
+		brne	ILoop1			; Continue Inner Loop
 		dec		mpr2		; decrement olcnt
-		brne	OLoop			; Continue Outer Loop
+		brne	OLoop1			; Continue Outer Loop
 		dec		waitcnt		; Decrement wait
-		brne	Loop			; Continue Wait loop
+		brne	Loop1			; Continue Wait loop
 
 		pop		mpr2		; Restore olcnt register
 		pop		ilcnt		; Restore ilcnt register
 		pop		waitcnt		; Restore wait register
 		ret				; Return from subroutine
-		
 
 ;***********************************************************
 ;*	Stored Program Data
