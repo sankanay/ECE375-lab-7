@@ -35,7 +35,7 @@
 .equ	Rock = 0b00000001
 .equ	Paper = 0b00000010
 .equ	Scissor = 0b00000011
-.equ	CodeSend = 0b11111111
+
 
 ; Winner Codes
 .equ	RockWinner = 0b10000000
@@ -86,7 +86,7 @@ INIT:
 
 		; Initialize LCD display
 		rcall	LCDInit
-		rcall	LCDBacklightOn
+		;rcall	LCDBacklightOn
 		rcall	LCDClr
 
 		;USART1
@@ -135,13 +135,13 @@ MAIN:
 		rcall	WAIT_OPPONENT	; display "WAITING FOR OPPONENT"
 		rcall	READY			; display "WAITING FOR OPPONENT"
 		rcall	WAITING			; display "WAITING FOR OPPONENT"
-		rcall	USART_Transmit	; transmit ready signal readyFlag=0
+		rcall	USART_Transmit	; transmit ready signal readyFlag=0 btn1 = 1
 		inc		readyFlag
 		rcall	START_DISPLAY
 		rjmp	MAIN
 
 NEXT:
-		cpi		btn1Flag, 1		; compare button flag
+		cpi		btn1Flag, 2		; compare button flag
 		brne	MAIN			; branch main
 		rcall	Wait			; wait between taps
 		cpi		mpr, $A0		; PD4 input
@@ -253,27 +253,70 @@ WAITING:
 ;-		FUNCTION: Transmit and Wait for Ready from Players
 ;----------------------------------------------------------------
 USART_Transmit: 
+		cpi		btn1Flag, 0x1
+		brne	ROCK_TRANSMIT
+		ldi		mpr2, SendReady	; load ready code
+		inc     btn1Flag
+		rjmp	TRANSMIT
+
+ROCK_TRANSMIT: 
+		cpi		itemchoice, 1
+		brne	PAPER_TRANSMIT
+		ldi		mpr2, Rock	; load ready code
+		rjmp	TRANSMIT
+
+PAPER_TRANSMIT:
+		cpi		itemchoice, 2
+		brne	SCISSOR_TRANSMIT
+		ldi		mpr2, Paper	; load ready code
+		rjmp	TRANSMIT
+
+SCISSOR_TRANSMIT:
+		cpi		itemchoice, 2
+		brne	NOTHING
+		ldi		mpr2, Scissor	; load ready code
+		rjmp	TRANSMIT
+
+
+TRANSMIT: 	
 		lds		mpr, UCSR1A		; load UCSR1A value
-		ldi		mpr2, CodeSend	; load ready code
 		sbrs	mpr, UDRE1		; Loop until UDR1 is empty 
-		rjmp	USART_Transmit	; loop till empty buffer
+		rjmp	TRANSMIT		; loop till empty buffer
 		sts		UDR1, mpr2 		; Move data to transmit data buffer 
-				
-
-
 		ret
+
 
 USART_Receive:
 		push	mpr
 		lds		mpr2, UDR1
 		cpi		mpr2, SendReady
-		brne	NOTHING
+		brne	ROCK_RCV
 		inc		readyFlag
 		rcall	START_DISPLAY
+		rjmp	POP_MPR
+ROCK_RCV: 
+		cpi		mpr2, Rock
+		brne	PAPER_RCV
+		rcall   DISPLAY_ROCK
+		rjmp	POP_MPR
+
+PAPER_RCV:
+		cpi		mpr2, Paper
+		brne	SCISSOR_RCV
+		rcall   DISPLAY_PAPER
+		rjmp	POP_MPR
+
+SCISSOR_RCV: 
+		cpi		mpr2, scissor
+		brne	POP_MPR
+		rcall   DISPLAY_SCISSOR
+		rjmp	POP_MPR
+POP_MPR:
 		pop		mpr
 		reti
 
-NOTHING:
+
+NOTHING:		
 		ret
 
 ;----------------------------------------------------------------
@@ -286,7 +329,7 @@ START_DISPLAY:
 		rcall	TIMER_INIT
 		rcall	GAME_START
 		rcall	GAME1
-		ldi		readyFlag, 0
+		ldi		readyFlag, 3
 		ret
 
 GAME_START:
@@ -430,7 +473,7 @@ INTERRUPT_OFF:
 		; Turn off Timer Interrupt
 		ldi		mpr2, 0b00000000
 		sts		TIMSK1, mpr2
-
+		rcall	USART_Transmit
 		ret
 ;----------------------------------------------------------------
 ; Sub:	Wait
