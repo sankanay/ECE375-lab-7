@@ -23,19 +23,24 @@
 .def	readyFlag = r18
 .def	btn1Flag = r19
 .def	itemchoice = r23
-;.def	ledcounter = r15
+.def	waitcnt = r24			; Wait Loop Counter
+.def	ilcnt = r25				; Inner Loop Counter
 
-.def	waitcnt = r24				; Wait Loop Counter
-.def	ilcnt = r25			; Inner Loop Counter
-;.def	olcnt = r25				; Outer Loop Counter
 
 .equ	ready1 = 7
 .equ	cycle = 4
 
 ; Use this signal code between two boards for their game ready
 .equ    SendReady = 0b11111111
+.equ	Rock = 0b00000001
+.equ	Paper = 0b00000010
+.equ	Scissor = 0b00000011
+.equ	CodeSend = 0b11111111
 
-
+; Winner Codes
+.equ	RockWinner = 0b10000000
+.equ	PaperWinner = 0b01000000
+.equ	ScissorWinner = 0b11000000
 
 ;***********************************************************
 ;*  Start of Code Segment
@@ -49,7 +54,7 @@
 	    rjmp    INIT            ; Reset interrupt
 
 .org	$0022
-		rjmp	Timer_Interrupt
+		rjmp	TIMER_INTERRUPT
 
 
 .org	$0032
@@ -100,16 +105,12 @@ INIT:
 		
 		;Enable receiver and transmitter
 		ldi		mpr, (1<<TXEN1 | 1<<RXEN1 | 1<<RXCIE1) 
-		sts		UCSR1B, mpr 	
-		
-		;TIMER/COUNTER1
-		
+		sts		UCSR1B, mpr 			
 
 		; Clear flags for communication
 		ldi		readyFlag, 0
 		ldi		btn1Flag, 0
 		ldi		itemchoice, 0
-		;ldi		ledcounter, 0
 
 		; Welcome screen for the players
 		rcall	SETUPLINES
@@ -134,38 +135,38 @@ MAIN:
 		rcall	WAIT_OPPONENT	; display "WAITING FOR OPPONENT"
 		rcall	READY			; display "WAITING FOR OPPONENT"
 		rcall	WAITING			; display "WAITING FOR OPPONENT"
-		rcall	USART_Transmit	; transmit ready signal
+		rcall	USART_Transmit	; transmit ready signal readyFlag=0
 		inc		readyFlag
-		rcall	START_DIPLAY
+		rcall	START_DISPLAY
 		rjmp	MAIN
 
 NEXT:
-		cpi		btn1Flag, 1
-		brne	MAIN
-		rcall	Wait
-		cpi		mpr, $A0
-		brne	MAIN
-		;rcall	timer_init
-		rcall	CHOSE_ITEM
-		rjmp	MAIN
+		cpi		btn1Flag, 1		; compare button flag
+		brne	MAIN			; branch main
+		rcall	Wait			; wait between taps
+		cpi		mpr, $A0		; PD4 input
+		brne	MAIN			; branch main
+		rcall	CHOSE_ITEM		; chose items per player
+		rjmp	MAIN			; loop
 
-timer_init:
+TIMER_INIT:
 
-		ldi		r16, 0x48         ; Set the timer compare match value (18750)
-		sts		OCR1AH, r16
+		;TIMER/COUNTER1
+		ldi		r16, 0x48       ; Set the timer compare match value (18750)
+		sts		OCR1AH, r16		; Load into OCR1A
 		ldi		r16, 0xCC
 		sts		OCR1AL, r16
 
-		ldi		mpr, 0b00000000
+		ldi		mpr, 0b00000000	; set normal mode
 		sts		TCCR1A, mpr
 
-		ldi		mpr, 0b00000100 ; set prescalar 1024
+		ldi		mpr, 0b00000100	; set prescalar 1024
 		sts		TCCR1B, mpr
 
-		ldi		mpr, 0x02
+		ldi		mpr, 0b00000010	; enable interrupt
 		sts		TIMSK1, mpr
 
-		sei
+		sei						; turn on interrupt
 
 		ret
 
@@ -245,18 +246,21 @@ WAITING:
 		brne	WAITING
 		cpi		ZH, high(STRING_END4<<1)
 
-		rcall	LCDWrite
+		rcall	LCDWrite				; write to LCD
 		ret
 
 ;----------------------------------------------------------------
 ;-		FUNCTION: Transmit and Wait for Ready from Players
 ;----------------------------------------------------------------
 USART_Transmit: 
-		lds		mpr, UCSR1A
-		ldi		mpr2, SendReady
+		lds		mpr, UCSR1A		; load UCSR1A value
+		ldi		mpr2, CodeSend	; load ready code
 		sbrs	mpr, UDRE1		; Loop until UDR1 is empty 
-		rjmp	USART_Transmit 
+		rjmp	USART_Transmit	; loop till empty buffer
 		sts		UDR1, mpr2 		; Move data to transmit data buffer 
+				
+
+
 		ret
 
 USART_Receive:
@@ -265,8 +269,7 @@ USART_Receive:
 		cpi		mpr2, SendReady
 		brne	NOTHING
 		inc		readyFlag
-		;rcall	timer_init
-		rcall	START_DIPLAY
+		rcall	START_DISPLAY
 		pop		mpr
 		reti
 
@@ -276,11 +279,11 @@ NOTHING:
 ;----------------------------------------------------------------
 ;-		FUNCTION: Start Game Message
 ;----------------------------------------------------------------
-START_DIPLAY:
+START_DISPLAY:
 		cpi		readyFlag, 2	
 		brne	NOTHING
 		rcall	LCDClr
-		rcall	timer_init
+		rcall	TIMER_INIT
 		rcall	GAME_START
 		rcall	GAME1
 		ldi		readyFlag, 0
@@ -376,7 +379,6 @@ DISPLAY_PAPER2:
 ;----------------------------------------------------------------
 ;-		FUNCTION: Display Scissors
 ;----------------------------------------------------------------
-
 DISPLAY_SCISSOR:
 		
 		ldi		ZH, HIGH(STRING_BEG9<<1); Move strings from Program Memory to Data Memory
@@ -404,23 +406,32 @@ COUNTDOWN:
 		ldi		mpr, 0b11110000
 		out		PORTB, mpr	
 		
-			
 		ret
 
 ;----------------------------------------------------------------
 ;-		FUNCTION: TIMER/COUNTER1 Interrupt
 ;----------------------------------------------------------------
-Timer_Interrupt:
+TIMER_INTERRUPT:
 
-		in mpr, PORTB
-		lsr mpr
-		andi mpr, $F0
-		out PORTB, mpr
-		rjmp timer_init
+		; 6 second timer on 4 LEDs
+		in		mpr, PORTB
+		lsr		mpr 
+		andi	mpr, $F0
+		out		PORTB, mpr
+
+		; Check if all LEDs are off
+		cpi		mpr, $00
+		breq	INTERRUPT_OFF
 		
 		reti
 
+INTERRUPT_OFF:
 
+		; Turn off Timer Interrupt
+		ldi		mpr2, 0b00000000
+		sts		TIMSK1, mpr2
+
+		ret
 ;----------------------------------------------------------------
 ; Sub:	Wait
 ; Desc:	A wait loop that is 16 + 159975*waitcnt cycles or roughly
@@ -430,23 +441,23 @@ Timer_Interrupt:
 ;			(((((3*ilcnt)-1+4)*olcnt)-1+4)*waitcnt)-1+16
 ;----------------------------------------------------------------
 Wait:
-		push	waitcnt			; Save wait register
-		push	ilcnt			; Save ilcnt register
-		push	mpr2			; Save olcnt register
+		push	waitcnt		; Save wait register
+		push	ilcnt		; Save ilcnt register
+		push	mpr2		; Save olcnt register
 
-Loop1:	ldi		mpr2, 90		; load olcnt register
-OLoop1:	ldi		ilcnt, 80		; load ilcnt register
-ILoop1:	dec		ilcnt			; decrement ilcnt
-		brne	ILoop1			; Continue Inner Loop
+Loop1:	ldi		mpr2, 90	; load olcnt register
+OLoop1:	ldi		ilcnt, 80	; load ilcnt register
+ILoop1:	dec		ilcnt		; decrement ilcnt
+		brne	ILoop1		; Continue Inner Loop
 		dec		mpr2		; decrement olcnt
-		brne	OLoop1			; Continue Outer Loop
+		brne	OLoop1		; Continue Outer Loop
 		dec		waitcnt		; Decrement wait
-		brne	Loop1			; Continue Wait loop
+		brne	Loop1		; Continue Wait loop
 
 		pop		mpr2		; Restore olcnt register
 		pop		ilcnt		; Restore ilcnt register
 		pop		waitcnt		; Restore wait register
-		ret				; Return from subroutine
+		ret					; Return from subroutine
 
 ;***********************************************************
 ;*	Stored Program Data
@@ -457,7 +468,7 @@ ILoop1:	dec		ilcnt			; decrement ilcnt
 ; after the .DB directive; these can help to access the data
 ;-----------------------------------------------------------
 STRING_BEG1:
-    .DB		"Welcome!"		; Declaring data in ProgMem
+    .DB		"Welcome!"				; Declaring data in ProgMem
 STRING_END1:
 STRING_BEG2:
 	.DB		"Please press PD7"
@@ -469,7 +480,7 @@ STRING_BEG4:
 	.DB		"for the opponent"
 STRING_END4:
 STRING_BEG5:
-    .DB		"GAME START"		; Declaring data in ProgMem
+    .DB		"GAME START"			; Declaring data in ProgMem
 STRING_END5:
 STRING_BEG6:
 	.DB		"for the opponent"
@@ -489,5 +500,8 @@ STRING_END10:
 STRING_BEG11:
 	.DB		"You Won!"
 STRING_END11:
+STRING_BEG12:
+	.DB		"DRAW! "
+STRING_END12:
 
 .include "LCDDriver.asm"
