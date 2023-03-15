@@ -86,7 +86,7 @@ INIT:
 
 		; Initialize LCD display
 		rcall	LCDInit
-		;rcall	LCDBacklightOn
+		rcall	LCDBacklightOn
 		rcall	LCDClr
 
 		;USART1
@@ -250,7 +250,7 @@ WAITING:
 		ret
 
 ;----------------------------------------------------------------
-;-		FUNCTION: Transmit and Wait for Ready from Players
+;-		FUNCTION: Transmit Ready from Players
 ;----------------------------------------------------------------
 USART_Transmit: 
 		cpi		btn1Flag, 0x1
@@ -262,21 +262,20 @@ USART_Transmit:
 ROCK_TRANSMIT: 
 		cpi		itemchoice, 1
 		brne	PAPER_TRANSMIT
-		ldi		mpr2, Rock	; load ready code
+		ldi		mpr2, Rock		; load ready code
 		rjmp	TRANSMIT
 
 PAPER_TRANSMIT:
 		cpi		itemchoice, 2
 		brne	SCISSOR_TRANSMIT
-		ldi		mpr2, Paper	; load ready code
+		ldi		mpr2, Paper		; load ready code
 		rjmp	TRANSMIT
 
 SCISSOR_TRANSMIT:
-		cpi		itemchoice, 2
+		cpi		itemchoice, 0
 		brne	NOTHING
 		ldi		mpr2, Scissor	; load ready code
 		rjmp	TRANSMIT
-
 
 TRANSMIT: 	
 		lds		mpr, UCSR1A		; load UCSR1A value
@@ -285,7 +284,12 @@ TRANSMIT:
 		sts		UDR1, mpr2 		; Move data to transmit data buffer 
 		ret
 
+NOTHING:		
+		ret
 
+;----------------------------------------------------------------
+;-		FUNCTION: Recieve Ready from Players
+;----------------------------------------------------------------
 USART_Receive:
 		push	mpr
 		lds		mpr2, UDR1
@@ -294,30 +298,28 @@ USART_Receive:
 		inc		readyFlag
 		rcall	START_DISPLAY
 		rjmp	POP_MPR
+
 ROCK_RCV: 
 		cpi		mpr2, Rock
 		brne	PAPER_RCV
-		rcall   DISPLAY_ROCK
+		rcall   DISPLAY_ROCK_LN1
 		rjmp	POP_MPR
 
 PAPER_RCV:
 		cpi		mpr2, Paper
 		brne	SCISSOR_RCV
-		rcall   DISPLAY_PAPER
+		rcall   DISPLAY_PAPER_LN1
 		rjmp	POP_MPR
 
 SCISSOR_RCV: 
-		cpi		mpr2, scissor
+		cpi		mpr2, Scissor
 		brne	POP_MPR
-		rcall   DISPLAY_SCISSOR
+		rcall   DISPLAY_SCISSOR_LN1
 		rjmp	POP_MPR
+
 POP_MPR:
 		pop		mpr
 		reti
-
-
-NOTHING:		
-		ret
 
 ;----------------------------------------------------------------
 ;-		FUNCTION: Start Game Message
@@ -398,6 +400,29 @@ DISPLAY_ROCK2:
 		ret
 
 ;----------------------------------------------------------------
+;-		FUNCTION: Display Rock to Line 1
+;----------------------------------------------------------------
+DISPLAY_ROCK_LN1:
+
+		rcall	LCDClrLn1
+		ldi		ZH, HIGH(STRING_BEG7<<1); Move strings from Program Memory to Data Memory
+		ldi		ZL, LOW(STRING_BEG7<<1)
+		lpm		r17, Z
+		ldi		YL, $00
+		ldi		YH, $01
+		st		Y, r17
+
+DISPLAY_ROCK_LN1_2:
+
+		lpm		mpr, Z+
+		st		Y+, mpr
+		cpi		ZL, low(STRING_END7<<1)
+		brne	DISPLAY_ROCK_LN1_2
+		cpi		ZH, high(STRING_END7<<1)
+		rcall	LCDWrLn1
+		ret
+
+;----------------------------------------------------------------
 ;-		FUNCTION: Display Paper
 ;----------------------------------------------------------------
 DISPLAY_PAPER:
@@ -420,6 +445,29 @@ DISPLAY_PAPER2:
 		ret
 
 ;----------------------------------------------------------------
+;-		FUNCTION: Display Paper to Line 1
+;----------------------------------------------------------------
+DISPLAY_PAPER_LN1:
+		
+		rcall	LCDClrLn1
+		ldi		ZH, HIGH(STRING_BEG8<<1); Move strings from Program Memory to Data Memory
+		ldi		ZL, LOW(STRING_BEG8<<1)
+		lpm		r17, Z
+		ldi		YL, $00
+		ldi		YH, $01
+		st		Y, r17
+
+DISPLAY_PAPER_LN1_2:
+
+		lpm		mpr, Z+
+		st		Y+, mpr
+		cpi		ZL, low(STRING_END8<<1)
+		brne	DISPLAY_PAPER_LN1_2
+		cpi		ZH, high(STRING_END8<<1)
+		rcall	LCDWrLn1
+		ret
+
+;----------------------------------------------------------------
 ;-		FUNCTION: Display Scissors
 ;----------------------------------------------------------------
 DISPLAY_SCISSOR:
@@ -439,6 +487,29 @@ DISPLAY_SCISSOR2:
 		brne	DISPLAY_SCISSOR2
 		cpi		ZH, high(STRING_END9<<1)
 		rcall	LCDWrLn2
+		ret
+
+;----------------------------------------------------------------
+;-		FUNCTION: Display Scissors
+;----------------------------------------------------------------
+DISPLAY_SCISSOR_LN1:
+
+		rcall	LCDClrLn1
+		ldi		ZH, HIGH(STRING_BEG9<<1); Move strings from Program Memory to Data Memory
+		ldi		ZL, LOW(STRING_BEG9<<1)
+		lpm		r17, Z
+		ldi		YL, $00
+		ldi		YH, $01
+		st		Y, r17
+
+DISPLAY_SCISSOR_LN1_2:
+
+		lpm		mpr, Z+
+		st		Y+, mpr
+		cpi		ZL, low(STRING_END9<<1)
+		brne	DISPLAY_SCISSOR_LN1_2
+		cpi		ZH, high(STRING_END9<<1)
+		rcall	LCDWrLn1
 		ret
 
 ;----------------------------------------------------------------
@@ -474,6 +545,9 @@ INTERRUPT_OFF:
 		ldi		mpr2, 0b00000000
 		sts		TIMSK1, mpr2
 		rcall	USART_Transmit
+		rcall	COUNTDOWN
+		rcall	Timer_init
+		
 		ret
 ;----------------------------------------------------------------
 ; Sub:	Wait
