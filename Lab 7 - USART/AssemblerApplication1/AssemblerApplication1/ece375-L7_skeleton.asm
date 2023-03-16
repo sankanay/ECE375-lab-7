@@ -27,20 +27,13 @@
 .def	ilcnt = r25				; Inner Loop Counter
 
 
-.equ	ready1 = 7
-.equ	cycle = 4
 
 ; Use this signal code between two boards for their game ready
 .equ    SendReady = 0b11111111
-.equ	Rock = 0b00000001
-.equ	Paper = 0b00000010
-.equ	Scissor = 0b00000011
+.equ	Rock = 0b00000000
+.equ	Paper = 0b00000001
+.equ	Scissor = 0b00000010
 
-
-; Winner Codes
-.equ	RockWinner = 0b10000000
-.equ	PaperWinner = 0b01000000
-.equ	ScissorWinner = 0b11000000
 
 ;***********************************************************
 ;*  Start of Code Segment
@@ -55,7 +48,6 @@
 
 .org	$0022
 		rjmp	TIMER_INTERRUPT
-
 
 .org	$0032
 		rjmp	USART_Receive
@@ -86,9 +78,9 @@ INIT:
 
 		; Initialize LCD display
 		rcall	LCDInit
-		rcall	LCDBacklightOn
+		;rcall	LCDBacklightOn
 		rcall	LCDClr
-
+	
 		;USART1
 		ldi		mpr, (1<<U2X1)	
 		sts		UCSR1A, mpr
@@ -114,17 +106,14 @@ INIT:
 
 		; Welcome screen for the players
 		rcall	SETUPLINES
-		rcall	LINE1
-		rcall	LINE2
 
-		;Other
+		; Turn on interrupts
 		sei
 
 ;***********************************************************
 ;*  Main Program
 ;***********************************************************
 MAIN:
-
 		in		mpr, PIND
 		andi	mpr, (1<<4 | 1<<7 | 1<<5)
 		cpi		mpr, $30		; check if left most is hit
@@ -138,6 +127,7 @@ MAIN:
 		rcall	USART_Transmit	; transmit ready signal readyFlag=0 btn1 = 1
 		inc		readyFlag
 		rcall	START_DISPLAY
+
 		rjmp	MAIN
 
 NEXT:
@@ -152,9 +142,9 @@ NEXT:
 TIMER_INIT:
 
 		;TIMER/COUNTER1
-		ldi		r16, 0x48       ; Set the timer compare match value (18750)
+		ldi		mpr, 0x48       ; Set the timer compare match value (18750)
 		sts		OCR1AH, r16		; Load into OCR1A
-		ldi		r16, 0xCC
+		ldi		mpr, 0xCC
 		sts		OCR1AL, r16
 
 		ldi		mpr, 0b00000000	; set normal mode
@@ -165,6 +155,9 @@ TIMER_INIT:
 
 		ldi		mpr, 0b00000010	; enable interrupt
 		sts		TIMSK1, mpr
+
+		ldi		mpr, 0b11110000
+		out		PORTB, mpr	
 
 		sei						; turn on interrupt
 
@@ -184,7 +177,7 @@ SETUPLINES:
 		ldi		YL, $00
 		ldi		YH, $01
 		st		Y, r17
-		ret
+		
 
 LINE1:
 		lpm		mpr, Z+
@@ -199,7 +192,7 @@ LINE1:
 		ldi		YL, $10
 		ldi		YH, $01
 		st		Y, r17
-		ret
+		
 
 LINE2:
 		lpm		mpr, Z+
@@ -263,18 +256,21 @@ ROCK_TRANSMIT:
 		cpi		itemchoice, 1
 		brne	PAPER_TRANSMIT
 		ldi		mpr2, Rock		; load ready code
+		ldi		readyFlag, Rock
 		rjmp	TRANSMIT
 
 PAPER_TRANSMIT:
 		cpi		itemchoice, 2
 		brne	SCISSOR_TRANSMIT
 		ldi		mpr2, Paper		; load ready code
+		ldi		readyFlag, Paper
 		rjmp	TRANSMIT
 
 SCISSOR_TRANSMIT:
 		cpi		itemchoice, 0
 		brne	NOTHING
 		ldi		mpr2, Scissor	; load ready code
+		ldi		readyFlag, Scissor
 		rjmp	TRANSMIT
 
 TRANSMIT: 	
@@ -303,18 +299,21 @@ ROCK_RCV:
 		cpi		mpr2, Rock
 		brne	PAPER_RCV
 		rcall   DISPLAY_ROCK_LN1
+		ldi		ilcnt, Rock
 		rjmp	POP_MPR
 
 PAPER_RCV:
 		cpi		mpr2, Paper
 		brne	SCISSOR_RCV
 		rcall   DISPLAY_PAPER_LN1
+		ldi		ilcnt, Paper
 		rjmp	POP_MPR
 
 SCISSOR_RCV: 
 		cpi		mpr2, Scissor
 		brne	POP_MPR
 		rcall   DISPLAY_SCISSOR_LN1
+		ldi		ilcnt, Scissor
 		rjmp	POP_MPR
 
 POP_MPR:
@@ -326,12 +325,11 @@ POP_MPR:
 ;----------------------------------------------------------------
 START_DISPLAY:
 		cpi		readyFlag, 2	
-		brne	NOTHING
+		brlt	NOTHING
 		rcall	LCDClr
 		rcall	TIMER_INIT
 		rcall	GAME_START
 		rcall	GAME1
-		ldi		readyFlag, 3
 		ret
 
 GAME_START:
@@ -350,7 +348,6 @@ GAME1:
 		brne	GAME1
 		cpi		ZH, high(STRING_END5<<1)	
 		rcall	LCDWrite
-		rcall	COUNTDOWN
 		ret
 
 ;----------------------------------------------------------------
@@ -363,12 +360,14 @@ CHOSE_ITEM:
 		rcall	LCDClrLn2
 		rcall	DISPLAY_ROCK
 		ret
+		
 CHOICE2: 
 		cpi		itemchoice, 2
 		brne	CHOICE3
 		rcall	LCDClrLn2
 		rcall	DISPLAY_PAPER
 		ret
+
 CHOICE3:
 		cpi		itemchoice, 3
 		brne	NOTHING
@@ -515,12 +514,12 @@ DISPLAY_SCISSOR_LN1_2:
 ;----------------------------------------------------------------
 ;-		FUNCTION: TIMER/COUNTER1 Countdown
 ;----------------------------------------------------------------
-COUNTDOWN:
+/*COUNTDOWN:
 
 		ldi		mpr, 0b11110000
 		out		PORTB, mpr	
 		
-		ret
+		ret*/
 
 ;----------------------------------------------------------------
 ;-		FUNCTION: TIMER/COUNTER1 Interrupt
@@ -542,13 +541,137 @@ TIMER_INTERRUPT:
 INTERRUPT_OFF:
 
 		; Turn off Timer Interrupt
-		ldi		mpr2, 0b00000000
-		sts		TIMSK1, mpr2
+		ldi		mpr, 0b00000000
+		sts		TIMSK1, mpr
+		cpi		itemchoice, 4
+		breq	DETERMINE_WINNER
+		cpi		itemchoice, 5
+		breq	REINIT
 		rcall	USART_Transmit
-		rcall	COUNTDOWN
-		rcall	Timer_init
+		rcall	TIMER_INIT
+		ldi		itemchoice, 4
+		reti
+
+REINIT:
 		
-		ret
+		
+		jmp		INIT
+		
+		
+DETERMINE_WINNER:
+
+		ldi		itemchoice, 5
+		cp		readyFlag, ilcnt	; if both values are the same
+		breq	DISPLAY_DRAW
+
+		cpi		readyFlag, Rock		; if personal has rock
+		breq	PLAYER1_ROCK		; then go to personal rock
+
+		cpi		readyFlag, Paper	; if personal has paper
+		breq	PLAYER1_PAPER		; then go to personal paper 
+
+		cpi		readyFlag, Scissor ; if personal has scissors
+		breq	PLAYER1_SCISSORS
+
+		reti
+
+
+PLAYER1_ROCK:
+		
+		cpi		ilcnt, Scissor		; if opponent has scissors
+		breq	DISPLAY_WINNER		; then display winner
+		rcall	DISPLAY_LOSER		; else display loser
+		rcall	TIMER_INIT
+		reti
+
+PLAYER1_PAPER:
+		;ldi		itemchoice, 5
+		cpi		ilcnt, Rock			; if opponent has rock
+		breq	DISPLAY_WINNER		; then display winner
+		rcall	DISPLAY_LOSER		; else display loser
+		rcall	TIMER_INIT
+		reti
+
+PLAYER1_SCISSORS:
+		;ldi		itemchoice, 5
+		cpi		ilcnt, Paper
+		breq	DISPLAY_WINNER
+		rcall	DISPLAY_LOSER
+		rcall	TIMER_INIT
+		reti
+
+
+;----------------------------------------------------------------
+;-		FUNCTION: Display Winner 
+;----------------------------------------------------------------
+DISPLAY_WINNER:
+
+		rcall	LCDClrLn1
+		ldi		ZH, HIGH(STRING_BEG11<<1); Move strings from Program Memory to Data Memory
+		ldi		ZL, LOW(STRING_BEG11<<1)
+		lpm		r17, Z
+		ldi		YL, $00
+		ldi		YH, $01
+		st		Y, r17
+
+DISPLAY_WINNER2:
+
+		lpm		mpr, Z+
+		st		Y+, mpr
+		cpi		ZL, low(STRING_END11<<1)
+		brne	DISPLAY_WINNER2
+		cpi		ZH, high(STRING_END11<<1)
+		rcall	LCDWrLn1
+		rcall	TIMER_INIT
+		reti
+;----------------------------------------------------------------
+;-		FUNCTION: Display Loser 
+;----------------------------------------------------------------
+DISPLAY_LOSER:
+
+		rcall	LCDClrLn1
+		ldi		ZH, HIGH(STRING_BEG10<<1); Move strings from Program Memory to Data Memory
+		ldi		ZL, LOW(STRING_BEG10<<1)
+		lpm		r17, Z
+		ldi		YL, $00
+		ldi		YH, $01
+		st		Y, r17
+
+DISPLAY_LOSER2:
+
+		lpm		mpr, Z+
+		st		Y+, mpr
+		cpi		ZL, low(STRING_END10<<1)
+		brne	DISPLAY_LOSER2
+		cpi		ZH, high(STRING_END10<<1)
+		rcall	LCDWrLn1
+		rcall	TIMER_INIT
+		reti
+
+;----------------------------------------------------------------
+;-		FUNCTION: Display Draw
+;----------------------------------------------------------------
+DISPLAY_DRAW:
+
+		rcall	LCDClrLn1
+		ldi		ZH, HIGH(STRING_BEG12<<1); Move strings from Program Memory to Data Memory
+		ldi		ZL, LOW(STRING_BEG12<<1)
+		lpm		r17, Z
+		ldi		YL, $00
+		ldi		YH, $01
+		st		Y, r17
+
+DISPLAY_DRAW2:
+
+		lpm		mpr, Z+
+		st		Y+, mpr
+		cpi		ZL, low(STRING_END12<<1)
+		brne	DISPLAY_DRAW2
+		cpi		ZH, high(STRING_END12<<1)
+		rcall	LCDWrLn1
+		rcall	TIMER_INIT
+		reti
+
 ;----------------------------------------------------------------
 ; Sub:	Wait
 ; Desc:	A wait loop that is 16 + 159975*waitcnt cycles or roughly
@@ -559,12 +682,12 @@ INTERRUPT_OFF:
 ;----------------------------------------------------------------
 Wait:
 		push	waitcnt		; Save wait register
-		push	ilcnt		; Save ilcnt register
+		push	mpr		; Save ilcnt register
 		push	mpr2		; Save olcnt register
 
 Loop1:	ldi		mpr2, 90	; load olcnt register
-OLoop1:	ldi		ilcnt, 80	; load ilcnt register
-ILoop1:	dec		ilcnt		; decrement ilcnt
+OLoop1:	ldi		mpr, 80	; load ilcnt register
+ILoop1:	dec		mpr		; decrement ilcnt
 		brne	ILoop1		; Continue Inner Loop
 		dec		mpr2		; decrement olcnt
 		brne	OLoop1		; Continue Outer Loop
@@ -572,7 +695,7 @@ ILoop1:	dec		ilcnt		; decrement ilcnt
 		brne	Loop1		; Continue Wait loop
 
 		pop		mpr2		; Restore olcnt register
-		pop		ilcnt		; Restore ilcnt register
+		pop		mpr		; Restore ilcnt register
 		pop		waitcnt		; Restore wait register
 		ret					; Return from subroutine
 
